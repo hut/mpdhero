@@ -1,0 +1,288 @@
+#!/usr/bin/ruby
+version = '0.0.0'
+
+require 'pathname'
+require 'optparse'
+require 'ostruct'
+
+$: << MYDIR = File.dirname(Pathname(__FILE__).realpath)
+require 'mpd'
+require 'classes'
+
+conf = OpenStruct.new
+conf.n = 1
+oparser = nil
+o = OptionParser.new do |opts|
+	oparser = opts
+	opts.banner = "Usage: mpdhero [options]"
+	opts.on("--version", "display version") do |v| puts version; exit end
+	opts.on("-v", "--[no-]verbose", "print information about what is happening") do |v|
+		conf.verbose = v
+	end
+	opts.on("-q", "--[no-]quiet", "supress warnings") do |v|
+		conf.quiet = v
+	end
+	opts.on("-R", "--[no-]more-randomness", "add more randomness in some operations") do |v|
+		conf.more_randomness = v
+	end
+	opts.on("-a", "--shuffle-albums", "shuffle the playlist but keep albums intact") do |v|
+		conf.mode = :shuffle_albums
+	end
+	opts.on("-k", "--shuffle-chunks", "shuffle 20-minute chunks of albums") do |v|
+		conf.mode = :shuffle_chunks
+	end
+	opts.on("-A", "--shuffle-artists", "shuffle the playlist but keep artists intact") do |v|
+		conf.mode = :shuffle_artists
+	end
+	opts.on("-b", "--add-random-album [PATH]", String, "adds a random album") do |v|
+		conf.mode = :add_random_album
+		conf.random_album_path = v
+	end
+	opts.on("-d", "--add-random-song [PATH]", String, "adds a random song") do |v|
+		conf.mode = :add_random_song
+		conf.random_song_path = v
+	end
+	opts.on("-n", "--number n", Numeric, "specifies a number") do |v|
+		conf.n = v
+	end
+	opts.on("-l", "--log [n]", Numeric, "delay the addition of songs by log n (x) minutes") do |v|
+		conf.log = v || 1.3
+	end
+	opts.on("-P", "--play", "start playing") do |v|
+		conf.play = true
+	end
+	opts.on("-C", "--clear", "clear playlist before doing anything") do |v|
+		conf.clear = true
+	end
+	opts.on("-c", "--[no-]current-first", "put current playling song/album first, when shuffling") do |v|
+		conf.current_first = v
+	end
+	opts.on("-h", "--host IP", String, "the mpd server, defaults to MPD_HOST || localhost") do |v|
+		conf.host = v
+	end
+	opts.on("-p", "--port PORT", Integer, "the mpd server port, defaults to MPD_PORT || 6600") do |v|
+		conf.port = v
+	end
+	opts.on("-r", "--remove-current", "removes the current entry/entries if something is added") do |v|
+		conf.remove_current = v
+	end
+end
+
+o.parse! rescue abort $!.name, $!.msg
+
+
+puts oparser.help or exit if !conf.mode
+$stderr.reopen('/dev/null', 'w') if conf.quiet
+$stdout.reopen('/dev/null', 'w') if !conf.verbose
+Mpd = MPD.new(conf.host, conf.port)
+Mpd.connect rescue abort "failed to connect"
+
+def sleep_log(base, x)
+	return if base.nil?
+	n = Math.log(x+1) / Math.log(base) * 60.0
+	puts "i sleep #{n}"
+	sleep n
+#rescue
+#	p $!
+#	nil
+end
+
+def splitter(list, average) #{{{
+	chunks = []
+	average = average.to_f
+
+	for name, album in list
+		total_time = album.time
+		parts = [[ (total_time / average).round, album.length ].min , 1].max
+		avg = total_time / parts
+		part = []
+
+		stack = Array.new(album)
+		while item = stack.shift
+			if part.empty?
+				part << item
+			elsif part.time < avg
+				if part.time + item.time.to_i < avg * 1.5
+					part << item
+				else
+					chunks << part
+					part = [item]
+				end
+			else
+				chunks << part
+				part = [item]
+			end
+		end
+		if not part.empty?
+			chunks << part
+		end
+#		puts "##{album.length} #{total_time} (#{total_time/60}m) / #{parts}"
+#		for chunk in chunks do print "##{chunk.length} #{chunk.time/60}m -- " end
+#		puts
+	end
+	return chunks
+end #}}}
+
+Mpd.clear if conf.clear
+
+case conf.mode
+when :shuffle_albums
+
+
+	## albums will be {"album1" => [track3, track1, track2], "album2" => [...], ...}
+	albums = {}
+	for track in Mpd.playlistinfo do
+		(albums[track.album] ||= []) << track
+	end
+
+	## make sure tracks within albums are sorted
+	for key, album in albums do
+		album.sort! {|a, b| a.track <=> b.track}
+	end
+
+	list = albums.keys.shuffle!
+
+	if conf.current_first
+		list.swap!(0, list.index(Mpd.currentsong.album))
+	end
+
+	## shuffle!
+	i, arr = -1, []
+	for album_key in list do
+		puts "%-30s - %s" % [albums[album_key].first.artist, album_key] if conf.verbose
+		for track in albums[album_key] do
+			arr << [track.dbid, i+=1]
+#			Mpd.moveid(track.dbid, i) if track.dbid != i
+		end
+	end
+	Mpd.move_pairs(*arr)
+	Mpd.play if conf.play
+
+when :shuffle_chunks
+
+	## albums will be {"album1" => [track3, track1, track2], "album2" => [...], ...}
+	albums = {}
+	for track in Mpd.playlistinfo do
+		(albums[File.dirname(track.file)] ||= []) << track
+	end
+	
+#	require 'pp'
+#	pp albums
+#	abort
+
+	if conf.more_randomness
+		## shuffle album tracks
+		for key, album in albums do
+			album.shuffle!
+		end
+	else
+		## make sure tracks within albums are sorted
+		for key, album in albums do
+			album.sort! {|a, b| (a.track || '') <=> (b.track || '')}
+		end
+	end
+
+	list = splitter(albums, 1200)
+	list.shuffle!
+
+	if conf.current_first
+		list.each_with_index do |chunk, i|
+			if chunk.include? Mpd.currentsong
+				list.swap!(0, i)
+				break
+			end
+		end
+	end
+
+	## shuffle!
+	i, arr = -1, []
+	for chunk in list do
+		puts "%-30s - %s" % [chunk.first.artist, chunk.first.album] if conf.verbose
+		for track in chunk do
+			arr << [track.dbid, i+=1]
+#			Mpd.moveid(track.dbid, i) if track.dbid != i
+		end
+	end
+	Mpd.move_pairs(*arr)
+	Mpd.play if conf.play
+
+when :shuffle_artists
+
+	## artists will be {"album1" => [track3, track1, track2], "album2" => [...], ...}
+	artists = {}
+	for track in Mpd.playlistinfo do
+		(artists[track.artist] ||= []) << track
+	end
+
+	## make sure tracks within artists are sorted
+#	for key, album in artists do
+#		album.sort! {|a, b| a.track <=> b.track}
+#	end
+
+	list = artists.keys.shuffle!
+
+	if conf.current_first
+		list.swap!(0, list.index(Mpd.currentsong.artist))
+	end
+
+	## shuffle!
+	i, arr = -1, []
+	for artist_key in list do
+		puts "%-30s - %s" % [artists[artist_key].first.artist, artist_key] if conf.verbose
+		for track in artists[artist_key] do
+			arr << [track.dbid, i+=1]
+#			Mpd.moveid(track.dbid, i) if track.dbid != i
+		end
+	end
+	Mpd.move_pairs(*arr)
+	Mpd.play if conf.play
+
+when :add_random_album
+
+	# get a list of all files in the given path
+	p conf
+	all = Mpd.listall(conf.random_album_path || '/')
+
+	conf.n.times do |x|
+		# get a random song and find all in the same album
+		one = Mpd.find("filename", all.random).first
+		found = Mpd.find('album', one.album)
+
+		# remove unwanted entries (duplicates, other artist with same album)
+		memory = []
+		found = found.select do |this|
+			if this.artist == one.artist and !memory.include?(this.title)
+				memory << this.title
+				true
+			else
+				false
+			end
+		end
+
+		# add them
+		found.each do |this|
+			Mpd.add this.file
+		end
+
+		Mpd.play if conf.play && x == 0
+		sleep_log(conf.log, x)
+	end
+
+when :add_random_song
+
+	all = Mpd.listall(conf.random_song_path || '/')
+	if (conf.remove_current)
+		Mpd.delete(Mpd.currentsong.pos)
+	end
+	xstart = Mpd.playlistlength
+	conf.n.times do |x|
+		Mpd.add(Mpd.find("filename", all.random).first.file)
+		Mpd.play if conf.play && x == 0
+		sleep_log(conf.log, x + xstart)
+	end
+
+else
+	puts "no mode specified"
+
+end
+

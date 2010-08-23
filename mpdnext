@@ -1,0 +1,102 @@
+#!/bin/bash
+# mpdnext
+#
+# This program runs as a daemon and manages the current mpd playlist
+# by changing the next song in the playlist to another similar song.
+#
+# To use this, select one song in your playlist and run this script.
+#
+# This script works best if your music is systematically ordered like this:
+# GENRE/ARTIST/ALBUM/SONG
+# for example:
+# Reggae/Bob Marley/1984 - Legend/09 - I Shot The Sheriff.ogg
+#
+# Change the depth by typing:
+# mpdnext <depth>
+#
+# The depth is a number that specifies how similar the next song will be.
+# A depth of 2 means, pick a random song from "Reggae/Bob Marley". A depth
+# of 0 would pick any random song.
+
+# configuration
+short_interval=0.1
+long_interval=3
+configfile="$HOME/.mpdnextdepth"
+
+# argument handling
+if [ "$1" == "--help" ]; then
+	echo "Usage: mpdnext [OPTION] [new depth]"
+	echo "Options:"
+	echo "--help       print this text and exit"
+	echo "--depth      print current depth and exit"
+	echo "no argument  run in a loop"
+	exit
+elif [ "$1" == "--depth" ]; then
+	cat "$configfile"
+	exit
+elif [ "$1" ]; then
+	echo "$1" > "$configfile"
+	exit
+fi
+
+# preparations
+interval="$long_interval"
+previous_depth=`cat "$configfile"`
+counter=
+last=
+test -f "$configfile" || echo 1 > "$configfile"
+mpc crop
+mpc consume on
+mpc random off
+
+# main loop
+while true; do
+	sleep $interval
+
+	# dynamically change sleep time
+	if [ "$counter" ]; then
+		counter=$(($counter - 1))
+		if [ "$counter" -lt 1 ]; then
+			counter=
+			interval="$short_interval"
+		fi
+	fi
+
+	# get the depth
+	depth=`cat "$configfile"`
+	case "$depth" in
+		any)    depth=0;;
+		genre)  depth=1;;
+		artist) depth=2;;
+		album)  depth=3;;
+		stop)   continue;;
+	esac
+
+	# delete the second song if the depth has changed
+	if [ "$previous_depth" -a "$depth" != "$previous_depth" ]; then
+		echo depth changed to $depth
+		mpc del 2
+		previous_depth="$depth"
+	fi
+
+	# don't care if playlist is longer than 2
+	[ "`mpc playlist | head -2 | wc -l`" -gt 1 ] && continue
+
+	# keep the last "current song" in a buffer in case the playlist
+	# is cleared.
+	current="`mpc playlist -f '%file%' | head -1`"
+	if [ "$current" ]; then
+		last="$current"
+	else
+		current="$last"
+	fi
+
+	# extract the path with the given depth
+	cmd='s/^\/\?\(\([^\/]*\/\?\)\{0,'"$depth"'\}\)[\/$].*$/\1/'
+	path=$(echo /"$current" | sed "$cmd")
+
+	# add one random song from that path
+	mpc listall "$path" | shuf -n 1 | mpc add
+	counter=50
+	interval="$short_interval"
+done
