@@ -58,7 +58,7 @@ while true; do
 		counter=$(($counter - 1))
 		if [ "$counter" -lt 1 ]; then
 			counter=
-			interval="$short_interval"
+			interval="$long_interval"
 		fi
 	fi
 
