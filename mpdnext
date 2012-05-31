@@ -51,16 +51,7 @@ mpc random off
 
 # main loop
 while true; do
-	sleep $interval
-
-	# dynamically change sleep time
-	if [ "$counter" ]; then
-		counter=$(($counter - 1))
-		if [ "$counter" -lt 1 ]; then
-			counter=
-			interval="$long_interval"
-		fi
-	fi
+	mpc idle playlist > /dev/null
 
 	# get the depth
 	depth=`cat "$configfile"`

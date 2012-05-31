@@ -364,6 +364,7 @@ class MPD
       return response if @@re['PING'].match(line)
       response << line
     end
+	 puts response
     return response
   end
 
