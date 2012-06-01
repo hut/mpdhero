@@ -1,0 +1,22 @@
+mpdhero transforms your mpd playlist, for example by shuffling album-wise or
+adding random songs.  It requires ruby 1.8.  mpdhero --help prints a full list
+of options:
+
+Usage: mpdhero [options]
+        --version                    display version
+    -v, --[no-]verbose               print information about what is happening
+    -q, --[no-]quiet                 supress warnings
+    -R, --[no-]more-randomness       add more randomness in some operations
+    -a, --shuffle-albums             shuffle the playlist but keep albums intact
+    -k, --shuffle-chunks             shuffle 20-minute chunks of albums
+    -A, --shuffle-artists            shuffle the playlist but keep artists intact
+    -b, --add-random-album [PATH]    adds a random album
+    -d, --add-random-song [PATH]     adds a random song
+    -n, --number n                   specifies a number
+    -l, --log [n]                    delay the addition of songs by log n (x) minutes
+    -P, --play                       start playing
+    -C, --clear                      clear playlist before doing anything
+    -c, --[no-]current-first         put current playling song/album first, when shuffling
+    -h, --host IP                    the mpd server, defaults to MPD_HOST || localhost
+    -p, --port PORT                  the mpd server port, defaults to MPD_PORT || 6600
+    -r, --remove-current             removes the current entry/entries if something is added
