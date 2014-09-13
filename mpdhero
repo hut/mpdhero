@@ -63,6 +63,9 @@ o = OptionParser.new do |opts|
 	opts.on("-p", "--port PORT", Integer, "the mpd server port, defaults to MPD_PORT || 6600") do |v|
 		conf.port = v
 	end
+	opts.on("-P", "--password PASS", String, "the mpd server password") do |v|
+		conf.pass = v
+	end
 	opts.on("-r", "--remove-current", "removes the current entry/entries if something is added") do |v|
 		conf.remove_current = v
 	end
@@ -75,6 +78,7 @@ puts oparser.help or exit if !conf.mode
 $stderr.reopen('/dev/null', 'w') if conf.quiet
 $stdout.reopen('/dev/null', 'w') if !conf.verbose
 Mpd = MPD.new(conf.host, conf.port)
+Mpd.password(conf.pass) if conf.pass
 Mpd.connect rescue abort "failed to connect"
 
 def sleep_log(base, x)
